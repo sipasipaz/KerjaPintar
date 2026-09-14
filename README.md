@@ -4,53 +4,63 @@ A personal project management app for one person running many projects at
 once — areas, projects, tasks, a scored "what should I work on?" view, a
 month calendar, a filterable board, and a lightweight weekly review.
 
-Data syncs across devices via Supabase (Postgres + Auth), with Google as
-the sign-in provider. Each person's data is private to their account,
-enforced by row-level security in Postgres — see `supabase.sql`.
+Data syncs across devices via Firebase (Google sign-in + Firestore). Each
+person's data lives in their own private subtree, enforced by Firestore
+security rules — see `firestore.rules`.
 
-## 1. Set up Supabase
+## 1. Create a Firebase project
 
-1. Create a project at [supabase.com](https://supabase.com) (or use the one
-   already connected via the Vercel integration).
-2. Go to **SQL Editor** → paste the contents of `supabase.sql` from this repo
-   → Run. This creates the `kv_store` table and locks it down so a user can
-   only ever read/write their own rows.
-3. Go to **Project Settings → API** and copy:
-   - **Project URL**
-   - **anon public** key
+1. Go to [console.firebase.google.com](https://console.firebase.google.com)
+   → **Add project** → give it a name → you can skip Google Analytics,
+   it's not needed here.
+2. Once created, click the **`</>`** (web) icon on the project overview page
+   to register a web app. Give it a nickname, skip Firebase Hosting (you're
+   deploying via Vercel/Netlify instead).
+3. It'll show you a `firebaseConfig` object with six values
+   (`apiKey`, `authDomain`, `projectId`, `storageBucket`,
+   `messagingSenderId`, `appId`) — you'll need these in step 4.
 
 ## 2. Turn on Google sign-in
 
-1. In the [Google Cloud Console](https://console.cloud.google.com/), create
-   (or reuse) a project → **APIs & Services → Credentials → Create
-   Credentials → OAuth client ID** → Application type: **Web application**.
-2. In Supabase, go to **Authentication → Providers → Google** and copy the
-   **Callback URL (for OAuth)** shown there.
-3. Back in Google Cloud Console, paste that callback URL into **Authorized
-   redirect URIs** on the OAuth client, then copy the generated **Client ID**
-   and **Client Secret**.
-4. Paste the Client ID and Client Secret into the Google provider settings
-   in Supabase and save. Toggle the provider **on**.
-5. In Supabase → **Authentication → URL Configuration**, set **Site URL** to
-   your deployed URL (e.g. `https://kerja-pintar.vercel.app`) and add it
-   under **Redirect URLs** too (plus `http://localhost:5173` for local dev).
+1. In the Firebase Console sidebar: **Build → Authentication → Get started**.
+2. Under **Sign-in method**, click **Google** → toggle **Enable** → pick a
+   support email → **Save**. That's it — no separate Google Cloud OAuth
+   client to create by hand.
 
-## 3. Set environment variables
+## 3. Create Firestore and set security rules
 
-Vite only exposes variables prefixed with `VITE_` to the browser. If the
-Vercel↔Supabase integration already added its own env vars, they likely
-**don't** have this prefix and won't be visible to the app — add these two
-explicitly in your deployment platform's project settings:
+1. Sidebar: **Build → Firestore Database → Create database**. Choose a
+   location close to you, start in **production mode**.
+2. Go to the **Rules** tab → replace the contents with what's in
+   `firestore.rules` in this repo → **Publish**.
+
+## 4. Set environment variables
+
+Vite only exposes variables prefixed with `VITE_` to the browser. Copy the
+six values from step 1 into your deploy platform's environment variables:
 
 ```
-VITE_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-public-key
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_STORAGE_BUCKET=...
+VITE_FIREBASE_MESSAGING_SENDER_ID=...
+VITE_FIREBASE_APP_ID=...
 ```
 
 See `.env.example`. For local dev, copy it to `.env.local` and fill in your
-values.
+values (these six are safe to expose in client code — that's normal for
+Firebase's web config; the security rules from step 3 are what actually
+protect the data, not secrecy of these values).
 
-## 4. Run it locally
+## 5. Authorize your deployed domain
+
+Firebase Auth only allows sign-in popups from domains you've approved.
+In **Authentication → Settings → Authorized domains**, add your Vercel
+domain (e.g. `kerja-pintar.vercel.app`). `localhost` is included by default
+for local dev.
+
+## 6. Run it locally
 
 ```bash
 npm install
@@ -60,14 +70,14 @@ npm run dev
 Open the URL Vite prints (usually `http://localhost:5173`). You'll be asked
 to sign in with Google before the app loads.
 
-## 5. Build for production
+## 7. Build for production
 
 ```bash
 npm run build
 npm run preview   # sanity-check the production build locally
 ```
 
-## 6. Push to GitHub / deploy
+## 8. Push to GitHub / deploy
 
 ```bash
 git init
@@ -79,19 +89,27 @@ git push -u origin main
 ```
 
 Vercel and Netlify both auto-detect Vite (build command `npm run build`,
-output directory `dist`) — just make sure the two `VITE_SUPABASE_*`
-variables from step 3 are set in the project's environment settings, then
-redeploy after adding them.
+output directory `dist`) — make sure the six `VITE_FIREBASE_*` variables
+from step 4 are set in the project's environment settings, then redeploy.
+
+## If sign-in doesn't work
+
+- **"popup blocked" or nothing happens on click** — your browser blocked
+  the sign-in popup. Allow popups for the site and try again.
+- **"unauthorized domain" error** — you skipped step 5, or added the wrong
+  domain (must match exactly what's in the browser's address bar).
+- **Blank/loading forever** — check the browser console; it usually means
+  one of the six env vars is missing or misspelled.
 
 ## Notes for future you
 
 - `src/App.jsx` is the whole application UI (single file). It only ever
-  talks to `window.storage` — it has no idea Supabase exists.
+  talks to `window.storage` — it has no idea Firebase exists.
 - `src/AuthGate.jsx` handles Google sign-in and wires `window.storage` to
-  `src/lib/supabaseStorage.js` once someone's signed in, then renders `App`.
-- `src/lib/supabaseStorage.js` implements the same four methods
-  (`get`/`set`/`delete`/`list`) against the `kv_store` table — this is the
-  only file that knows about Supabase's data shape.
+  `src/lib/firestoreStorage.js` once someone's signed in, then renders `App`.
+- `src/lib/firestoreStorage.js` implements the same four methods
+  (`get`/`set`/`delete`/`list`) against Firestore — this is the only file
+  that knows about Firebase's data shape.
 - `src/lib/storage.js` is the old localStorage-only version, unused by
   default now but kept in case you ever want a no-login offline mode —
   point `main.jsx` at `App` directly instead of `AuthGate` to use it.

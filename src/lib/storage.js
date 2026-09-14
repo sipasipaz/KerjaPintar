@@ -1,7 +1,7 @@
 // localStorage-backed implementation of the storage interface.
 //
 // Not used by default anymore — main.jsx now uses AuthGate, which wires
-// window.storage to src/lib/supabaseStorage.js after Google sign-in, so
+// window.storage to src/lib/firestoreStorage.js after Google sign-in, so
 // data syncs across devices. This file is kept around in case you ever
 // want a no-login / offline-only mode: point main.jsx at it directly
 // instead of AuthGate and it works exactly as before.

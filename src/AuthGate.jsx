@@ -1,31 +1,32 @@
 import { useEffect, useState } from "react";
-import { supabase } from "./lib/supabaseClient.js";
-import { supabaseStorage } from "./lib/supabaseStorage.js";
+import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { auth } from "./lib/firebaseClient.js";
+import { firestoreStorage } from "./lib/firestoreStorage.js";
 import App from "./App.jsx";
 
 export default function AuthGate() {
-  const [session, setSession] = useState(undefined); // undefined = loading, null = signed out
+  const [user, setUser] = useState(undefined); // undefined = loading, null = signed out
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-    });
-    return () => sub.subscription.unsubscribe();
+    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
+    return unsub;
   }, []);
 
   async function signInWithGoogle() {
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: window.location.origin },
-    });
+    setError(null);
+    try {
+      await signInWithPopup(auth, new GoogleAuthProvider());
+    } catch (e) {
+      setError(e.message || "Sign-in failed.");
+    }
   }
 
-  async function signOut() {
-    await supabase.auth.signOut();
+  async function handleSignOut() {
+    await signOut(auth);
   }
 
-  if (session === undefined) {
+  if (user === undefined) {
     return (
       <div style={screenStyle}>
         <span style={{ fontFamily: "ui-monospace, monospace", color: "#9a9a9a", fontSize: 13 }}>Loading…</span>
@@ -33,7 +34,7 @@ export default function AuthGate() {
     );
   }
 
-  if (session === null) {
+  if (user === null) {
     return (
       <div style={screenStyle}>
         <div style={cardStyle}>
@@ -45,19 +46,20 @@ export default function AuthGate() {
             <GoogleIcon />
             Continue with Google
           </button>
+          {error && <div style={{ fontSize: 12, color: "#c0392b", marginTop: 14 }}>{error}</div>}
         </div>
       </div>
     );
   }
 
-  // Signed in — wire the app's storage to Supabase, scoped to this user,
+  // Signed in — wire the app's storage to Firestore, scoped to this user,
   // then render the app itself.
-  if (!window.storage || window.__ppos_storage_backend !== "supabase") {
-    window.storage = supabaseStorage;
-    window.__ppos_storage_backend = "supabase";
+  if (!window.storage || window.__ppos_storage_backend !== "firebase") {
+    window.storage = firestoreStorage;
+    window.__ppos_storage_backend = "firebase";
   }
 
-  return <App onSignOut={signOut} userEmail={session.user?.email} />;
+  return <App onSignOut={handleSignOut} userEmail={user.email} />;
 }
 
 const screenStyle = {
