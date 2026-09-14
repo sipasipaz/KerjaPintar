@@ -1,63 +1,108 @@
 import { useEffect, useState } from "react";
-import { supabase } from "./lib/supabaseClient.js";
-import { supabaseStorage } from "./lib/supabaseStorage.js";
+import {
+  GoogleAuthProvider, browserLocalPersistence, getRedirectResult,
+  onAuthStateChanged, setPersistence, signInWithRedirect, signOut,
+} from "firebase/auth";
+import { auth } from "./lib/firebaseClient.js";
+import { firestoreStorage } from "./lib/firestoreStorage.js";
 import App from "./App.jsx";
 
 export default function AuthGate() {
-  const [session, setSession] = useState(undefined); // undefined = loading, null = signed out
+  const [user, setUser] = useState(undefined); // undefined = loading, null = signed out
+  const [status, setStatus] = useState("Starting up…");
+  const [log, setLog] = useState([]);
+
+  function addLog(msg) {
+    const line = `${new Date().toLocaleTimeString()} — ${msg}`;
+    console.log("[auth]", msg);
+    setLog(l => [...l, line]);
+  }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-    });
-    return () => sub.subscription.unsubscribe();
+    let unsub = () => {};
+    (async () => {
+      try {
+        await setPersistence(auth, browserLocalPersistence);
+        addLog("Persistence set (browserLocalPersistence).");
+      } catch (e) {
+        addLog(`setPersistence failed: ${e.code || e.message}`);
+      }
+
+      setStatus("Checking for a completed sign-in…");
+      try {
+        const result = await getRedirectResult(auth);
+        addLog(result?.user
+          ? `Redirect result: signed in as ${result.user.email}`
+          : "Redirect result: nothing pending (normal on first load).");
+      } catch (e) {
+        addLog(`getRedirectResult error: ${e.code || "unknown"} — ${e.message}`);
+      }
+
+      unsub = onAuthStateChanged(auth, (u) => {
+        addLog(u ? `Auth state: signed in as ${u.email}` : "Auth state: signed out");
+        setUser(u);
+        setStatus(u ? "Signed in." : "Not signed in.");
+      });
+    })();
+    return () => unsub();
   }, []);
 
   async function signInWithGoogle() {
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: window.location.origin },
-    });
+    addLog("Starting Google redirect sign-in…");
+    setStatus("Redirecting to Google…");
+    try {
+      await signInWithRedirect(auth, new GoogleAuthProvider());
+      // Page navigates away here — nothing after this line runs.
+    } catch (e) {
+      addLog(`signInWithRedirect error: ${e.code || "unknown"} — ${e.message}`);
+    }
   }
 
-  async function signOut() {
-    await supabase.auth.signOut();
+  async function handleSignOut() {
+    await signOut(auth);
   }
 
-  if (session === undefined) {
-    return (
-      <div style={screenStyle}>
-        <span style={{ fontFamily: "ui-monospace, monospace", color: "#9a9a9a", fontSize: 13 }}>Loading…</span>
-      </div>
-    );
+  if (user) {
+    if (!window.storage || window.__ppos_storage_backend !== "firebase") {
+      window.storage = firestoreStorage;
+      window.__ppos_storage_backend = "firebase";
+    }
+    return <App onSignOut={handleSignOut} userEmail={user.email} />;
   }
 
-  if (session === null) {
-    return (
-      <div style={screenStyle}>
-        <div style={cardStyle}>
-          <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 6, color: "#1f2023" }}>Personal Project OS</div>
-          <div style={{ fontSize: 13, color: "#6c6e75", marginBottom: 22 }}>
-            Sign in with Google to sync your projects and tasks across devices.
-          </div>
+  return (
+    <div style={screenStyle}>
+      <div style={cardStyle}>
+        <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 6, color: "#1f2023" }}>Personal Project OS</div>
+        <div style={{ fontSize: 13, color: "#6c6e75", marginBottom: 22 }}>
+          {user === undefined ? status : "Sign in with Google to sync your projects and tasks across devices."}
+        </div>
+        {user !== undefined && (
           <button onClick={signInWithGoogle} style={buttonStyle}>
             <GoogleIcon />
             Continue with Google
           </button>
-        </div>
+        )}
+
+        <details style={{ marginTop: 20, textAlign: "left" }}>
+          <summary style={{ fontSize: 12, color: "#9a9a9a", cursor: "pointer" }}>Debug log ({log.length})</summary>
+          <pre style={{
+            fontSize: 11, lineHeight: 1.5, color: "#4a4a4a", background: "#F2F3F5",
+            padding: 10, borderRadius: 6, marginTop: 8, maxHeight: 220, overflow: "auto",
+            whiteSpace: "pre-wrap", wordBreak: "break-word",
+          }}>
+            {log.length ? log.join("\n") : "Nothing logged yet."}
+          </pre>
+          <button
+            onClick={() => navigator.clipboard.writeText(log.join("\n"))}
+            style={{ ...buttonStyle, marginTop: 8, fontSize: 12, padding: "6px 12px" }}
+          >
+            Copy debug log
+          </button>
+        </details>
       </div>
-    );
-  }
-
-  // Signed in — wire the app's storage to Supabase, scoped to this user,
-  // then render the app itself.
-  if (!window.storage || window.__ppos_storage_backend !== "supabase") {
-    window.storage = supabaseStorage;
-    window.__ppos_storage_backend = "supabase";
-  }
-
-  return <App onSignOut={signOut} userEmail={session.user?.email} />;
+    </div>
+  );
 }
 
 const screenStyle = {
@@ -71,7 +116,7 @@ const screenStyle = {
 };
 
 const cardStyle = {
-  width: 360,
+  width: 380,
   padding: "32px 28px",
   borderRadius: 12,
   background: "#FFFFFF",
