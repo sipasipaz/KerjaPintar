@@ -1,10 +1,10 @@
-// Standalone replacement for Claude's artifact `window.storage` API.
-// Same method shapes (get/set/delete/list), backed by the browser's
-// localStorage so the app keeps working outside Claude.
+// localStorage-backed implementation of the storage interface.
 //
-// If you later add a real backend, swap this module out for one that
-// calls your API instead — nothing in the rest of the app needs to change
-// as long as it implements the same four async methods.
+// Not used by default anymore — main.jsx now uses AuthGate, which wires
+// window.storage to src/lib/supabaseStorage.js after Google sign-in, so
+// data syncs across devices. This file is kept around in case you ever
+// want a no-login / offline-only mode: point main.jsx at it directly
+// instead of AuthGate and it works exactly as before.
 
 const NAMESPACE = "ppos";
 
